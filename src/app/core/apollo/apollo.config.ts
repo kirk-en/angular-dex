@@ -2,9 +2,9 @@ import { HttpClientModule } from '@angular/common/http';
 import { NgModule } from '@angular/core';
 
 // Apollo imports - these are the GraphQL/Apollo client libraries for Angular
-import { ApolloClient, ApolloLink, InMemoryCache } from '@apollo/client/core';
+import { ApolloClient, InMemoryCache } from '@apollo/client/core';
 import { HttpLink } from 'apollo-angular/http';
-import { APOLLO_OPTIONS } from 'apollo-angular';
+import { APOLLO_OPTIONS, Apollo } from 'apollo-angular';
 
 // This is an init function that configures the Apollo client how to behave. Called once when the app starts.
 // Comprised of 3 elements: cache, link, and URL.
@@ -34,9 +34,9 @@ export const createApollo = (httpLink: HttpLink): ApolloClient.Options => {
 // Angular modules are like saying "Here's a bundle of functionality that works together."
 @NgModule({
   // Tells angular what imports the module needs to work.
-  imports: [HttpClientModule], // this is a built in Angular module that makes network requests.
+  imports: [HttpClientModule],
 
   // Providers tell Angular the services and configs this module makes available to the entire app. Can be similar to a React context
-  providers: [{ provide: APOLLO_OPTIONS, useFactory: createApollo, deps: [HttpLink] }],
+  providers: [Apollo, { provide: APOLLO_OPTIONS, useFactory: createApollo, deps: [HttpLink] }],
 })
 export class ApolloConfigModule {}
