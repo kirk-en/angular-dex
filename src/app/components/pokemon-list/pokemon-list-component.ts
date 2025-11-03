@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, ElementRef, ViewChildren } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Apollo, gql } from 'apollo-angular';
 import WaveSurfer from 'wavesurfer.js';
@@ -175,7 +175,7 @@ export class PokemonListComponent implements OnInit {
   }
 
   private initializeWaveform(audioUrl: string, pokemonId: number): void {
-    // Check if wavesurfer already exisits for this pokemon
+    // Check if wavesurfer already exists for this pokemon
     const existingWavesurfer = this.wavesurfers.get(pokemonId);
     if (existingWavesurfer) {
       existingWavesurfer.play();
@@ -193,8 +193,10 @@ export class PokemonListComponent implements OnInit {
     wavesurfer.on('ready', () => {
       wavesurfer.play();
     });
-    // Store this instance in our map of waveSufers
+    // Store this instance in our map of wavesurfers
     this.wavesurfers.set(pokemonId, wavesurfer);
+
+    //TODO: Handle cleanup of wavesurfer instances using ngOnDestroy lifecycle hook when component is destroyed
   }
 
   private fetchPokemon(): void {
