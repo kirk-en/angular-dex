@@ -1,6 +1,7 @@
-import { Component, OnInit, ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Apollo, gql } from 'apollo-angular';
+import WaveSurfer from 'wavesurfer.js';
 
 // Define our datashapes for Typescript
 
@@ -78,7 +79,6 @@ const GET_POKEMON_LIST = gql`
   imports: [CommonModule],
   // This is the HTML template for this component, the front end code being displayed
   template: `
-    <audio #audioPlayer></audio>
     <div>
       <p>The sounds of your favorite pocket monsters!</p>
     </div>
@@ -100,7 +100,7 @@ const GET_POKEMON_LIST = gql`
             />
             <p>{{ pokemon.name }}</p>
           </div>
-          <div>waveform!</div>
+          <div [attr.id]="'waveform-' + pokemon.id" class="waveform"></div>
         </div>
       </li>
       }
@@ -118,13 +118,14 @@ const GET_POKEMON_LIST = gql`
       }
       .flex {
         display: flex;
+        align-items: center;
         &__left {
           justify-content: flex-start;
         }
       }
       .poke-card {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
 
         flex-direction: column;
         gap: 10px;
@@ -143,6 +144,10 @@ const GET_POKEMON_LIST = gql`
           height: 150px;
         }
       }
+      .waveform {
+        width: 100%;
+        margin-left: 1rem;
+      }
     `,
   ],
 })
@@ -152,9 +157,10 @@ export class PokemonListComponent implements OnInit {
   pokemonList: Pokemon[] = [];
   isLoading: boolean = false;
   error: string | null = null;
-  @ViewChild('audioPlayer') audioPlayer!: ElementRef<HTMLAudioElement>;
+  private wavesurfers: Map<number, WaveSurfer> = new Map();
 
   constructor(private apollo: Apollo) {}
+
   // Runs ONCE when component is initialized, great to grab data.
   ngOnInit(): void {
     this.fetchPokemon();
@@ -163,10 +169,34 @@ export class PokemonListComponent implements OnInit {
   onPokemonClick(pokemon: Pokemon): void {
     const cryUrl = pokemon?.pokemoncries?.[0]?.cries?.latest || null;
     if (cryUrl) {
-      // We use nativeElement here to access the raw HTML element rather than the Anguilar elementRef wrapper.
-      this.audioPlayer.nativeElement.src = cryUrl;
-      this.audioPlayer.nativeElement.play();
+      // Create waveform visualization after audio source is set
+      this.initializeWaveform(cryUrl, pokemon.id);
     }
+  }
+
+  private initializeWaveform(audioUrl: string, pokemonId: number): void {
+    // Check if wavesurfer already exists for this pokemon
+    const existingWavesurfer = this.wavesurfers.get(pokemonId);
+    if (existingWavesurfer) {
+      existingWavesurfer.play();
+      return;
+    }
+
+    const container = document.getElementById(`waveform-${pokemonId}`)!;
+    // Create new wavesurfer instance
+    const wavesurfer = WaveSurfer.create({
+      container: container,
+      waveColor: '#38bce4ff',
+      progressColor: '#df4d4dff',
+      url: audioUrl,
+    });
+    wavesurfer.on('ready', () => {
+      wavesurfer.play();
+    });
+    // Store this instance in our map of wavesurfers
+    this.wavesurfers.set(pokemonId, wavesurfer);
+
+    //TODO: Handle cleanup of wavesurfer instances using ngOnDestroy lifecycle hook when component is destroyed
   }
 
   private fetchPokemon(): void {
@@ -174,11 +204,11 @@ export class PokemonListComponent implements OnInit {
     this.error = null;
 
     this.apollo
-      .watchQuery<PokemonListResponse>({
+      .query<PokemonListResponse>({
         query: GET_POKEMON_LIST,
-        variables: { limit: 20, offset: Math.floor(Math.random() * (151 - 20)) },
+        variables: { limit: 20, offset: Math.floor(Math.random() * (152 - 20)) },
       })
-      .valueChanges.subscribe({
+      .subscribe({
         next: (result) => {
           console.log('Data received:', result);
           if (result.data?.pokemon) {
