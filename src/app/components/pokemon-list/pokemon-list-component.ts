@@ -80,7 +80,7 @@ const GET_POKEMON_LIST = gql`
   template: `
     <audio #audioPlayer></audio>
     <div>
-      <p>Hello World!</p>
+      <p>The sounds of your favorite pocket monsters!</p>
     </div>
     @if (isLoading) {
     <p>This thing is loading right now...</p>
@@ -90,13 +90,17 @@ const GET_POKEMON_LIST = gql`
     <ul class="list">
       <!-- track is like a key when mapping in React -->
       @for (pokemon of pokemonList; track pokemon.id) {
-      <li class="main__list" (click)="onPokemonClick(pokemon)">
-        <div class="pokeflex">
-          <p>{{ pokemon.name }}</p>
-          <img
-            src="{{ (pokemon.pokemonsprites?.[0]?.sprites?.other?.showdown?.front_default) || '' }}"
-            alt="Image of {{ pokemon.name }}"
-          />
+      <li class="list__item" (click)="onPokemonClick(pokemon)">
+        <div class="flex flex__left">
+          <div class="poke-card">
+            <img
+              src="{{ (pokemon.pokemonsprites?.[0]?.sprites?.other?.showdown?.front_default) || '' }}"
+              alt="Image of {{ pokemon.name }}"
+              class="list__image"
+            />
+            <p>{{ pokemon.name }}</p>
+          </div>
+          <div>waveform!</div>
         </div>
       </li>
       }
@@ -112,21 +116,32 @@ const GET_POKEMON_LIST = gql`
         max-width: 1200px;
         margin: 0 auto;
       }
-      .pokeflex {
+      .flex {
+        display: flex;
+        &__left {
+          justify-content: flex-start;
+        }
+      }
+      .poke-card {
         display: flex;
         align-items: center;
+
+        flex-direction: column;
         gap: 10px;
-      }
-      .main__list {
-        padding: 12px 16px;
-        border-bottom: 1px solid #eee;
-      }
-      .main__list:hover {
-        background-color: #f9f9f9;
       }
       .list {
         list-style-type: none;
         padding: 0;
+        &__item {
+          padding: 12px 16px;
+          border-bottom: 1px solid #eee;
+          &:hover {
+            background-color: #f9f9f9;
+          }
+        }
+        &__image {
+          height: 150px;
+        }
       }
     `,
   ],
@@ -148,6 +163,7 @@ export class PokemonListComponent implements OnInit {
   onPokemonClick(pokemon: Pokemon): void {
     const cryUrl = pokemon?.pokemoncries?.[0]?.cries?.latest || null;
     if (cryUrl) {
+      // We use nativeElement here to access the raw HTML element rather than the Anguilar elementRef wrapper.
       this.audioPlayer.nativeElement.src = cryUrl;
       this.audioPlayer.nativeElement.play();
     }

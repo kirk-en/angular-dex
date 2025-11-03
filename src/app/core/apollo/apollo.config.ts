@@ -22,7 +22,7 @@ export const createApollo = (httpLink: HttpLink): ApolloClient.Options => {
       watchQuery: {
         fetchPolicy: 'cache-and-network',
         // How long (in milliseconds) to wait before fetching from network
-        pollInterval: 5 * 60 * 1000,
+        pollInterval: 60 * 60 * 1000,
       },
       // regular queries are one time fetches that run and do not continue listening for changes.
       query: { fetchPolicy: 'cache-first', errorPolicy: 'all' },
