@@ -202,11 +202,11 @@ export class PokemonListComponent implements OnInit {
     this.error = null;
 
     this.apollo
-      .watchQuery<PokemonListResponse>({
+      .query<PokemonListResponse>({
         query: GET_POKEMON_LIST,
-        variables: { limit: 20, offset: Math.floor(Math.random() * (151 - 20)) },
+        variables: { limit: 20, offset: Math.floor(Math.random() * (152 - 20)) },
       })
-      .valueChanges.subscribe({
+      .subscribe({
         next: (result) => {
           console.log('Data received:', result);
           if (result.data?.pokemon) {
