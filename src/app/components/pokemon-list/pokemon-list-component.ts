@@ -79,33 +79,37 @@ const GET_POKEMON_LIST = gql`
   imports: [CommonModule],
   // This is the HTML template for this component, the front end code being displayed
   template: `
-    <div>
-      <p>The sounds of your favorite pocket monsters!</p>
-    </div>
-    @if (isLoading) {
-    <p>This thing is loading right now...</p>
-    } @if (error) {
-    <p>ERROR</p>
-    } @if (pokemonList && pokemonList.length > 0) {
-    <ul class="list">
-      <!-- track is like a key when mapping in React -->
-      @for (pokemon of pokemonList; track pokemon.id) {
-      <li class="list__item" (click)="onPokemonClick(pokemon)">
-        <div class="flex flex__left">
-          <div class="poke-card">
-            <img
-              src="{{ (pokemon.pokemonsprites?.[0]?.sprites?.other?.showdown?.front_default) || '' }}"
-              alt="Image of {{ pokemon.name }}"
-              class="list__image"
-            />
-            <p>{{ pokemon.name }}</p>
+    <div class="pokemon-list-container">
+      <div>
+        <h1>Pokédex Explorer</h1>
+        <p>The sounds of your favorite pocket monsters!</p>
+      </div>
+      @if (isLoading) {
+      <p>This thing is loading right now...</p>
+      } @if (error) {
+      <p>ERROR</p>
+      } @if (pokemonList && pokemonList.length > 0) {
+      <ul class="list">
+        <!-- track is like a key when mapping in React -->
+        @for (pokemon of pokemonList; track pokemon.id) {
+        <li class="list__item">
+          <div class="flex flex__left">
+            <div class="poke-card">
+              <img
+                src="{{ (pokemon.pokemonsprites?.[0]?.sprites?.other?.showdown?.front_default) || '' }}"
+                alt="Image of {{ pokemon.name }}"
+                class="list__image"
+              />
+              <p>{{ pokemon.name }}</p>
+            </div>
+            <div [attr.id]="'waveform-' + pokemon.id" class="waveform"></div>
+            <div><button class="button3d" (click)="onPokemonClick(pokemon)">Listen</button></div>
           </div>
-          <div [attr.id]="'waveform-' + pokemon.id" class="waveform"></div>
-        </div>
-      </li>
+        </li>
+        }
+      </ul>
       }
-    </ul>
-    }
+    </div>
   `,
 
   // This is CSS scoped only to this component.
@@ -141,12 +145,18 @@ const GET_POKEMON_LIST = gql`
           }
         }
         &__image {
+          // Container size
+          width: 150px;
           height: 150px;
+          // Maintain aspect ratio - helps with weird sizes like Horsea and Exeggutor
+          object-fit: contain;
+          // Center the image in its container
+          object-position: center;
         }
       }
       .waveform {
         width: 100%;
-        margin-left: 1rem;
+        margin: 0 4rem;
       }
     `,
   ],
@@ -188,6 +198,7 @@ export class PokemonListComponent implements OnInit {
       container: container,
       waveColor: '#38bce4ff',
       progressColor: '#df4d4dff',
+      cursorWidth: 0,
       url: audioUrl,
     });
     wavesurfer.on('ready', () => {
