@@ -1,8 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Apollo, gql } from 'apollo-angular';
 import WaveSurfer from 'wavesurfer.js';
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record.esm.js';
+import { AudioAnalysisService } from '../../services/audio-analysis.service';
 
 // Define our datashapes for Typescript
 
@@ -10,30 +11,24 @@ import RecordPlugin from 'wavesurfer.js/dist/plugins/record.esm.js';
 interface PokemonSpriteShowdown {
   front_default: string | null;
 }
-
 interface PokemonSpritesOther {
   showdown: PokemonSpriteShowdown;
 }
-
 interface PokemonSprites {
   other: PokemonSpritesOther;
 }
-
 interface PokemonSpriteEdge {
   sprites: PokemonSprites;
 }
-
 // Types for Pokemon cries returned by GraphQL.
 // We model the shape returned by the query; the `cries` object can be null
 // or include a `latest` field that we read when a user clicks a Pokémon.
 interface PokemonCry {
   latest?: string | null;
 }
-
 interface PokemonCryEdge {
   cries?: PokemonCry | null;
 }
-
 // Main Pokemon type including optional fields returned by the query.
 // We mark the sprite and cries arrays as optional because not every
 // record is guaranteed to include them; this prevents TypeScript errors when indexing.
@@ -45,17 +40,19 @@ interface Pokemon {
   pokemonsprites?: PokemonSpriteEdge[] | null;
   pokemoncries?: PokemonCryEdge[] | null;
 }
-
 interface PokemonListResponse {
   pokemon: Pokemon[];
 }
-
 interface RecorderState {
   wavesurfer: WaveSurfer;
   record: RecordPlugin;
   playbackWavesurfer?: WaveSurfer; // Optional - only exists after recording
   isRecording: boolean;
 }
+interface SimilarityScores {
+  [pokemonId: number]: number; // Index signature: any number key → number value
+}
+
 // Our graphQL query to get a list of Pokemon
 // The `gql` is just a helper that tells Apollo "This is GraphQL"
 // We are writing this query seperatey up here and then passing to Apollo. The query has very similar syntax to a function.
@@ -182,18 +179,182 @@ const GET_POKEMON_LIST = gql`
 })
 
 // Component Class - the logic behind the component
-export class PokemonListComponent implements OnInit {
+export class PokemonListComponent implements OnInit, OnDestroy {
   pokemonList: Pokemon[] = [];
   isLoading: boolean = false;
   error: string | null = null;
   private wavesurfers: Map<number, WaveSurfer> = new Map();
   private recordingSessions: Map<number, RecorderState> = new Map();
+  similarityScores: SimilarityScores = {};
 
-  constructor(private apollo: Apollo) {}
+  constructor(private apollo: Apollo, private audioAnalysis: AudioAnalysisService) {}
 
   // Runs ONCE when component is initialized, great to grab data.
   ngOnInit(): void {
     this.fetchPokemon();
+  }
+
+  /**
+   * Cleanup lifecycle hook: Runs when component is destroyed
+   *
+   * In React, this is like the cleanup function in useEffect:
+   *   useEffect(() => {
+   *     // setup
+   *     return () => {
+   *       // cleanup (this is ngOnDestroy in Angular)
+   *     };
+   *   }, []);
+   *
+   * Why this matters:
+   * - Prevents memory leaks (WaveSurfer instances hold AudioContext references)
+   * - Stops any playing audio
+   * - Closes AudioContext properly (prevents "Can't close AudioContext twice" error)
+   */
+  ngOnDestroy(): void {
+    this.cleanupWavesurfers();
+    this.cleanupRecordingSessions();
+  }
+
+  /**
+   * Destroy all playback wavesurfer instances
+   *
+   * When we destroy a WaveSurfer, it closes its AudioContext
+   * If we have multiple instances sharing the same context, destroying them
+   * in the wrong order causes: "DOMException: Can't close an AudioContext twice"
+   */
+  private cleanupWavesurfers(): void {
+    this.wavesurfers.forEach((wavesurfer) => {
+      try {
+        wavesurfer.destroy();
+      } catch (error) {
+        console.warn('Error destroying wavesurfer:', error);
+      }
+    });
+    this.wavesurfers.clear();
+  }
+
+  /**
+   * Destroy all recording sessions and their waveforms
+   *
+   * RecorderState can have:
+   * - wavesurfer: the recording input display
+   * - playbackWavesurfer: optional, the playback display after recording
+   *
+   * We need to destroy both to properly cleanup the AudioContext
+   */
+  private cleanupRecordingSessions(): void {
+    this.recordingSessions.forEach((session) => {
+      try {
+        if (session.wavesurfer) {
+          session.wavesurfer.destroy();
+        }
+        if (session.playbackWavesurfer) {
+          session.playbackWavesurfer.destroy();
+        }
+      } catch (error) {
+        console.warn('Error destroying recording session:', error);
+      }
+    });
+    this.recordingSessions.clear();
+  }
+
+  async compareAudio(pokemonId: number): Promise<void> {
+    const session = this.recordingSessions.get(pokemonId);
+    if (!session || !session.playbackWavesurfer) {
+      console.warn('No recording available to compare');
+      return;
+    }
+
+    /**
+     * Get the Pokemon's cry WaveSurfer instance
+     *
+     * Type: WaveSurfer | undefined
+     * (Map.get() might return undefined if key doesn't exist)
+     */
+    const pokemonWavesurfer = this.wavesurfers.get(pokemonId);
+    if (!pokemonWavesurfer) {
+      console.warn('Pokemon audio not loaded yet');
+      return;
+    }
+
+    /**
+     * Extract AudioBuffer from WaveSurfer instances
+     *
+     * WaveSurfer v7+ changed the API:
+     * - Old: wavesurfer.backend.buffer
+     * - New: wavesurfer.getDecodedData()
+     *
+     * getDecodedData() returns the decoded audio data as an AudioBuffer
+     * This is what we need to analyze with Meyda
+     *
+     * Type assertion with 'as any':
+     * We use 'as any' because WaveSurfer's TypeScript types might not expose this method
+     * This is a common pattern when working with external libraries
+     */
+    try {
+      const pokemonBuffer: AudioBuffer = (pokemonWavesurfer as any).getDecodedData();
+      const recordingBuffer: AudioBuffer = (session.playbackWavesurfer as any).getDecodedData();
+
+      /**
+       * Extract features from both audio sources
+       *
+       * TypeScript knows:
+       * - extractFeatures returns AudioFeatures | null
+       * - We need to check for null before proceeding
+       */
+      const pokemonFeatures = this.audioAnalysis.extractFeatures(pokemonBuffer);
+      const recordingFeatures = this.audioAnalysis.extractFeatures(recordingBuffer);
+
+      /**
+       * Type guard: Ensure both feature extractions succeeded
+       *
+       * if (!pokemonFeatures || !recordingFeatures)
+       *     ^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^
+       *     Check not null       Check not null
+       *
+       * TypeScript's type narrowing:
+       * - Before: Both might be null
+       * - After this check: Both are definitely AudioFeatures (not null)
+       */
+      if (!pokemonFeatures || !recordingFeatures) {
+        console.error('Failed to extract audio features');
+        return;
+      }
+
+      /**
+       * Calculate similarity score
+       *
+       * TypeScript ensures:
+       * - calculateSimilarity expects two AudioFeatures objects
+       * - We're passing the correct types (verified above)
+       * - Returns a number (the similarity score)
+       */
+      const similarity: number = this.audioAnalysis.calculateSimilarity(
+        pokemonFeatures,
+        recordingFeatures
+      );
+
+      /**
+       * Store the score in our scores object
+       *
+       * TypeScript Index Signature:
+       * this.similarityScores[pokemonId] = similarity;
+       *                      ^^^^^^^^^^    ^^^^^^^^^^
+       *                      number key    number value
+       *
+       * This is allowed because SimilarityScores interface has:
+       * [pokemonId: number]: number;
+       *
+       * If we tried:
+       * this.similarityScores[pokemonId] = "high"; // Error!
+       * TypeScript: Type 'string' is not assignable to type 'number'
+       */
+      this.similarityScores[pokemonId] = similarity;
+
+      console.log(`Similarity score for Pokemon ${pokemonId}: ${similarity}%`);
+    } catch (error) {
+      console.error('Error during audio comparison:', error);
+    }
   }
 
   onPokemonClick(pokemon: Pokemon): void {
@@ -202,10 +363,6 @@ export class PokemonListComponent implements OnInit {
       // Create waveform visualization after audio source is set
       this.initializeWaveform(cryUrl, pokemon.id);
     }
-  }
-  onRecordClick(): void {
-    console.log('clicked');
-    // Add your recording logic here
   }
 
   private initializeWaveform(audioUrl: string, pokemonId: number): void {
@@ -230,8 +387,6 @@ export class PokemonListComponent implements OnInit {
     });
     // Store this instance in our map of wavesurfers
     this.wavesurfers.set(pokemonId, wavesurfer);
-
-    //TODO: Handle cleanup of wavesurfer instances using ngOnDestroy lifecycle hook when component is destroyed
   }
 
   private initializeRecording(pokemonId: number): void {
@@ -267,7 +422,22 @@ export class PokemonListComponent implements OnInit {
         progressColor: 'rgba(217, 17, 224, 1)',
         url: recordedUrl,
       });
-      wavesurfer.destroy(); // Clear the original recording waveform
+      wavesurfer.destroy(); // Clear the original recording waveform -- remove to fix error, let's just hide this wave in the front end
+      /**
+       * Stop the recording wavesurfer but don't destroy it yet
+       *
+       * Why not destroy?
+       * - Multiple WaveSurfer instances often share the same AudioContext
+       * - Destroying too early can cause "Can't close AudioContext twice" error
+       * - Let ngOnDestroy handle cleanup when component is removed from DOM
+       *
+       * In React terms:
+       * - Don't cleanup inside event handlers
+       * - Do it in the useEffect cleanup function
+       * - Here, the "cleanup function" is ngOnDestroy
+       */
+      wavesurfer.stop();
+
       // Auto-play when ready
       playbackWavesurfer.on('ready', () => {
         playbackWavesurfer.play();
@@ -316,6 +486,10 @@ export class PokemonListComponent implements OnInit {
     if (isRecording) {
       record.stopRecording();
       session.isRecording = false;
+
+      setTimeout(() => {
+        this.compareAudio(pokemonId);
+      }, 500);
     } else {
       record.startRecording();
       session.isRecording = true;
