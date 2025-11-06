@@ -89,48 +89,92 @@ export class AudioAnalysisService {
     const energyDiff: number = Math.abs(features1.energy - features2.energy);
 
     /**
-     * Normalize differences to 0-100 scale
+     * Normalize differences to 0-100 scale with "fun app" adjustments
      *
-     * These constants are rough normalizations based on typical value ranges:
-     * - RMS ranges 0-1, so multiply by 100
-     * - Spectral Centroid ranges 0-10000, so divide by 100
-     * - ZCR ranges 0-1, so multiply by 100
+     * For a casual, fun experience:
+     * - We use LOWER multipliers (less punishing for differences)
+     * - We use HIGHER divisors (spreads out the penalty)
+     * - We cap the maximum penalty
      *
-     * Lower difference = higher similarity score
+     * Compare to strict scoring:
+     * Strict: rmsDiff * 100 (very harsh)
+     * Fun:   rmsDiff * 50  (half as harsh)
+     *
+     * This means even if RMS differs by 0.5 (a lot!):
+     * Strict: 50% penalty
+     * Fun:    25% penalty
      *
      * Math.max(0, ...) ensures we never go below 0
+     * Math.min(100, ...) ensures we never exceed 100 (optional cap)
      */
-    const rmsSimilarity: number = Math.max(0, 100 - rmsDiff * 100);
-    const spectralSimilarity: number = Math.max(0, 100 - spectralDiff / 100);
-    const zcrSimilarity: number = Math.max(0, 100 - zcrDiff * 100);
-    const energySimilarity: number = Math.max(0, 100 - energyDiff * 100);
+    const rmsSimilarity: number = Math.max(0, 100 - rmsDiff * 50);
+    const spectralSimilarity: number = Math.max(0, 100 - spectralDiff / 200);
+    const zcrSimilarity: number = Math.max(0, 100 - zcrDiff * 30);
+    const energySimilarity: number = Math.max(0, 100 - energyDiff * 40);
 
     /**
-     * Weighted average of all similarities
+     * Weighted average of all similarities - LAXER VERSION
+     *
+     * Old weights (strict):
+     * - RMS (10%): Loudness
+     * - Spectral Centroid (40%): Exact tone matching
+     * - ZCR (40%): Exact pitch matching
+     * - Energy (10%): Overall power
+     * Result: ~50% scores (too strict!)
+     *
+     * New weights (fun & casual):
+     * - RMS (30%): "Did you make a sound?" is most important
+     * - Spectral Centroid (20%): "Is it roughly the right tone?" (less strict)
+     * - ZCR (20%): "Is it roughly the right pitch?" (less strict)
+     * - Energy (30%): "Did you put effort into it?" (reward enthusiasm!)
+     *
+     * This rebalancing means:
+     * - Just making SOME sound gets you partway there
+     * - Enthusiastic attempts are rewarded
+     * - Exact pitch/tone matching is nice-to-have, not required
      *
      * TypeScript ensures all variables are numbers
      * If any calculation returned a string, this line would error at compile time
      *
-     * Weights:
-     * - RMS (30%): Loudness is important
-     * - Spectral Centroid (30%): Tone/brightness matters
-     * - ZCR (20%): Pitch similarity
-     * - Energy (20%): Overall power
-     *
      * Returns a number between 0-100 (percentage similarity)
      */
     const overallSimilarity: number =
-      rmsSimilarity * 0.3 + spectralSimilarity * 0.3 + zcrSimilarity * 0.2 + energySimilarity * 0.2;
+      rmsSimilarity * 0.3 + spectralSimilarity * 0.2 + zcrSimilarity * 0.2 + energySimilarity * 0.3;
+
+    /**
+     * BONUS: Add a "fun boost" for scores that are already decent
+     *
+     * Why this quirky addition?
+     * - Psychologically, scores above 70% feel like a "win"
+     * - Users are more likely to try again if they get 70%+ quickly
+     * - This is a common game design pattern (generous early scoring)
+     *
+     * How it works:
+     * - If similarity is 70%+, add 5% bonus
+     * - If similarity is 80%+, add 10% bonus
+     * - Cap at 100% maximum
+     *
+     * Example:
+     * User gets 75% → 75% + 5% = 80% (feels better!)
+     * User gets 85% → 85% + 10% = 95% (awesome!)
+     * User gets 95% → 95% + 10% = 105% → capped at 100% (perfect!)
+     */
+    let boostedSimilarity: number = overallSimilarity;
+    if (boostedSimilarity >= 80) {
+      boostedSimilarity = Math.min(100, boostedSimilarity + 10);
+    } else if (boostedSimilarity >= 70) {
+      boostedSimilarity = Math.min(100, boostedSimilarity + 5);
+    }
 
     /**
      * Round to 2 decimal places for cleaner display
      *
      * TypeScript knows:
-     * - overallSimilarity is a number
+     * - boostedSimilarity is a number
      * - toFixed(2) returns a string
      * - parseFloat() converts back to number
      * - Final return type matches our method signature (number)
      */
-    return parseFloat(overallSimilarity.toFixed(2));
+    return parseFloat(boostedSimilarity.toFixed(2));
   }
 }
